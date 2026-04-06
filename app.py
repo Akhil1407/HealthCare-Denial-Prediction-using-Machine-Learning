@@ -12,8 +12,8 @@ import pickle
 # -------- UNZIP MODEL -------- #
 
 if not os.path.exists("model.pkl"):
-    if os.path.exists("model.zip"):
-        with zipfile.ZipFile("model.zip", "r") as zip_ref:
+    if os.path.exists("model_pickle.zip"):
+        with zipfile.ZipFile("model_pickle.zip", "r") as zip_ref:
             zip_ref.extractall()
         print("Model extracted successfully")
 
