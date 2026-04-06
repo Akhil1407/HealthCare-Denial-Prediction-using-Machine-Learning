@@ -5,6 +5,7 @@ import pickle
 from PIL import Image
 import pytesseract
 import re
+
 import os
 import zipfile
 import pickle
@@ -12,14 +13,26 @@ import pickle
 # -------- UNZIP MODEL -------- #
 
 if not os.path.exists("model.pkl"):
-    if os.path.exists("model_pickle.zip"):
-        with zipfile.ZipFile("model_pickle.zip", "r") as zip_ref:
+    if os.path.exists("model.zip"):
+        with zipfile.ZipFile("model.zip", "r") as zip_ref:
             zip_ref.extractall()
         print("Model extracted successfully")
 
+# -------- FIND model.pkl -------- #
+
+model_path = None
+
+for root, dirs, files in os.walk("."):
+    if "model.pkl" in files:
+        model_path = os.path.join(root, "model.pkl")
+        break
+
 # -------- LOAD FILES -------- #
 
-model = pickle.load(open("model.pkl", "rb"))
+if model_path is None:
+    raise FileNotFoundError("model.pkl not found even after extraction")
+
+model = pickle.load(open(model_path, "rb"))
 scaler = pickle.load(open("scaler.pkl", "rb"))
 columns = pickle.load(open("columns.pkl", "rb"))
 
