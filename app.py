@@ -5,6 +5,23 @@ import pickle
 from PIL import Image
 import pytesseract
 import re
+import os
+import zipfile
+import pickle
+
+# -------- UNZIP MODEL -------- #
+
+if not os.path.exists("model.pkl"):
+    if os.path.exists("model.zip"):
+        with zipfile.ZipFile("model.zip", "r") as zip_ref:
+            zip_ref.extractall()
+        print("Model extracted successfully")
+
+# -------- LOAD FILES -------- #
+
+model = pickle.load(open("model.pkl", "rb"))
+scaler = pickle.load(open("scaler.pkl", "rb"))
+columns = pickle.load(open("columns.pkl", "rb"))
 
 # -------- TESSERACT PATH -------- #
 pytesseract.pytesseract.tesseract_cmd = (
