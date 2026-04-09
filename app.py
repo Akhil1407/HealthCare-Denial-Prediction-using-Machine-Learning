@@ -75,9 +75,9 @@ diagnosis_map = {
 }
 
 plan_description = {
-    "HMO": "Use only network hospitals/doctors and referral is usually needed for specialists.",
-    "PPO": "Flexible plan allowing any doctor visit with lower cost for network providers.",
-    "EPO": "Only network providers are covered except emergencies.",
+    "HMO": "Use only network hospitals/doctors and referral is usually needed.",
+    "PPO": "Flexible plan allowing any doctor visit.",
+    "EPO": "Only network providers are covered.",
     "POS": "Hybrid plan with referral support.",
     "HDHP": "Lower premium but higher deductible."
 }
@@ -128,14 +128,12 @@ elif page == "📊 Prediction":
         image = Image.open(uploaded_file)
         st.image(image, use_container_width=True)
 
-        # -------- SAFE OCR -------- #
         try:
             if IS_CLOUD:
                 extracted_text = "⚠ OCR not supported in cloud deployment"
             else:
                 extracted_text = pytesseract.image_to_string(image)
-
-        except Exception as e:
+        except:
             extracted_text = "⚠ OCR Error"
 
         st.subheader("📜 Extracted Text")
@@ -160,6 +158,7 @@ elif page == "📊 Prediction":
 
     if st.button("Predict"):
 
+        # -------- DATA PREP -------- #
         user_data = pd.DataFrame(0, index=[0], columns=columns)
 
         user_data.loc[0, 'patient_age_years'] = age
@@ -172,11 +171,119 @@ elif page == "📊 Prediction":
         user_data.loc[0, f"procedure_code_cpt_{procedure}"] = 1
         user_data.loc[0, f"primary_diagnosis_code_icd10_{diagnosis}"] = 1
 
-        user_scaled = scaler.transform(user_data)
+        # -------- FIX COLUMN ORDER -------- #
+        model_columns = list(columns)
+
+        for col in model_columns:
+            if col not in user_data.columns:
+                user_data[col] = 0
+
+        user_data = user_data[model_columns]
+
+        # -------- SCALING -------- #
+        user_scaled = scaler.transform(user_data.values)
+
+        # -------- PREDICTION -------- #
         prob = model.predict_proba(user_scaled)[0][1] * 100
 
-        st.subheader("📊 Result")
-        st.write("Probability:", round(prob, 2), "%")
+        # -------- RULES -------- #
+        reasons = []
 
-        status = "APPROVED" if prob < 30 else "RISK" if prob < 70 else "DENIED"
-        st.write("Status:", status)
+        network_val = 1 if network == "Yes" else 0
+        prior_auth_val = 1 if prior_auth == "Yes" else 0
+
+        if network_val == 0:
+            reasons.append("Out-of-network provider")
+
+        if prior_auth_val == 0:
+            reasons.append("Missing prior authorization")
+
+        if billing > 100000:
+            reasons.append("High billing amount")
+
+        if delay > 30:
+            reasons.append("Late claim submission")
+
+        # -------- DECISION -------- #
+        if len(reasons) >= 3:
+            status = "DENIED"
+        elif len(reasons) == 2:
+            status = "RISK"
+        else:
+            status = "APPROVED"
+
+        # -------- OUTPUT -------- #
+        st.subheader("📊 Result")
+        st.write("Claim Status:", status)
+        st.write("Denial Probability:", round(prob, 2), "%")
+
+        # -------- WHY -------- #
+        st.subheader("📌 Why this prediction?")
+
+        if reasons:
+            st.write(f"The claim has **{round(prob, 2)}% denial probability** because:")
+            for reason in reasons:
+                st.write(f"🔹 {reason}")
+        else:
+            approval_reasons = []
+
+            if network_val == 1:
+                approval_reasons.append("Provider is in-network")
+
+            if prior_auth_val == 1:
+                approval_reasons.append("Prior authorization available")
+
+            if billing <= 100000:
+                approval_reasons.append("Normal billing amount")
+
+            if delay <= 30:
+                approval_reasons.append("Submitted on time")
+
+            if age <= 75:
+                approval_reasons.append("Normal patient profile")
+
+            st.write(f"The claim has **low denial probability ({round(prob, 2)}%)** because:")
+            for reason in approval_reasons:
+                st.write(f"✅ {reason}")
+
+        # -------- MEDICAL INFO -------- #
+        st.subheader("🩺 Medical Info")
+        st.write(f"{procedure} → {procedure_map[procedure]}")
+        st.write(f"{diagnosis} → {diagnosis_map[diagnosis]}")
+
+        # -------- SAVE HISTORY -------- #
+        history_row = {
+            "Age": age,
+            "Plan": plan,
+            "Procedure": procedure,
+            "Diagnosis": diagnosis,
+            "Probability %": round(prob, 2),
+            "Status": status
+        }
+
+        st.session_state.prediction_history.append(history_row)
+
+    # -------- HISTORY -------- #
+    st.markdown("---")
+    st.subheader("📁 Prediction History Report")
+
+    if st.session_state.prediction_history:
+        history_df = pd.DataFrame(st.session_state.prediction_history)
+
+        with st.expander("📊 View Previous Predictions", expanded=True):
+            st.dataframe(history_df, use_container_width=True)
+
+        csv = history_df.to_csv(index=False).encode("utf-8")
+
+        st.download_button(
+            "⬇ Download Report",
+            csv,
+            "prediction_history.csv",
+            "text/csv"
+        )
+
+        if st.button("🗑 Clear History"):
+            st.session_state.prediction_history = []
+            st.rerun()
+    else:
+        st.info("No predictions made yet.")
