@@ -7,7 +7,9 @@ The **Insurance Claim Prediction System** is a Machine Learning-based web applic
 This project demonstrates the practical application of **data preprocessing, feature engineering, and classification algorithms** in a real-world healthcare domain.
 
 ---
-
+Live Demo Link :
+https://healthcare-denial-prediction-using-machine-learning-h398ipduri.streamlit.app/
+ 
 ## 🎯 Objectives
 
 * Predict claim approval status using ML models
