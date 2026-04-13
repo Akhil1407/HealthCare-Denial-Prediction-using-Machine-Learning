@@ -6,42 +6,25 @@ from PIL import Image
 import pytesseract
 import re
 import os
-import zipfile
+import platform
 
-# -------- DETECT CLOUD -------- #
-IS_CLOUD = os.getenv("STREAMLIT_SERVER_PORT") is not None
-
-# -------- UNZIP MODEL -------- #
-if not os.path.exists("model.pkl"):
-    if os.path.exists("model.zip"):
-        with zipfile.ZipFile("model.zip", "r") as zip_ref:
-            zip_ref.extractall()
-
-# -------- FIND MODEL -------- #
-model_path = None
-for root, dirs, files in os.walk("."):
-    if "model.pkl" in files:
-        model_path = os.path.join(root, "model.pkl")
-        break
-
-if model_path is None:
-    raise FileNotFoundError("model.pkl not found")
-
-# -------- LOAD FILES -------- #
-model = pickle.load(open(model_path, "rb"))
-scaler = pickle.load(open("scaler.pkl", "rb"))
-columns = pickle.load(open("columns.pkl", "rb"))
-
-# -------- LOCAL TESSERACT PATH -------- #
-if not IS_CLOUD:
-    pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+# -------- TESSERACT PATH -------- #
+if platform.system() == "Windows":
+    tesseract_path = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+    if os.path.exists(tesseract_path):
+        pytesseract.pytesseract.tesseract_cmd = tesseract_path
 
 # -------- PAGE CONFIG -------- #
 st.set_page_config(page_title="Claim AI", layout="wide")
 
-# -------- SESSION -------- #
+# -------- SESSION HISTORY -------- #
 if "prediction_history" not in st.session_state:
     st.session_state.prediction_history = []
+
+# -------- LOAD FILES -------- #
+model = pickle.load(open("model.pkl", "rb"))
+scaler = pickle.load(open("scaler.pkl", "rb"))
+columns = pickle.load(open("columns.pkl", "rb"))
 
 # -------- MAPS -------- #
 plan_map = {
@@ -75,11 +58,11 @@ diagnosis_map = {
 }
 
 plan_description = {
-    "HMO": "Use only network hospitals/doctors and referral is usually needed.",
-    "PPO": "Flexible plan allowing any doctor visit.",
-    "EPO": "Only network providers are covered.",
-    "POS": "Hybrid plan with referral support.",
-    "HDHP": "Lower premium but higher deductible."
+    "HMO": "Use only network hospitals/doctors and referral is usually needed for specialists.",
+    "PPO": "Flexible plan allowing any doctor visit with lower cost for network providers.",
+    "EPO": "Only network providers are covered except emergencies, usually no referral needed.",
+    "POS": "Hybrid plan with referral support and optional out-of-network coverage.",
+    "HDHP": "Lower premium but higher deductible before insurance starts paying."
 }
 
 # -------- OCR FUNCTION -------- #
@@ -92,26 +75,39 @@ def extract_details(text):
     if age_match:
         age = int(age_match.group(1))
 
-    for code in diagnosis_map.keys():
+    for code in diagnosis_map:
         if code in text:
             diagnosis = code
 
-    for code in procedure_map.keys():
+    for code in procedure_map:
         if code in text:
             procedure = code
 
     return age, diagnosis, procedure
 
+
 # -------- SIDEBAR -------- #
-page = st.sidebar.radio("Navigate", ["🏠 Project Info", "📊 Prediction"])
+page = st.sidebar.radio(
+    "Navigate",
+    ["🏠 Project Info", "📊 Prediction"]
+)
 
 # -------- PAGE 1 -------- #
 if page == "🏠 Project Info":
+
     st.title("🏥 Healthcare Claim Prediction System")
+
     st.markdown("""
+### 📌 Project Overview
 - Predicts claim **Approved / Risk / Denied**
 - Uses **Machine Learning + Rule-based Logic**
 - Helps reduce claim errors
+- Improves claim processing efficiency
+
+### ⚠️ Disclaimer
+- Model is NOT 100% accurate
+- Based on historical claim patterns
+- Final decision should be reviewed manually
 """)
 
 # -------- PAGE 2 -------- #
@@ -119,7 +115,10 @@ elif page == "📊 Prediction":
 
     st.title("📊 Claim Prediction")
 
-    uploaded_file = st.file_uploader("Upload Image", type=["png", "jpg", "jpeg"])
+    uploaded_file = st.file_uploader(
+        "📄 Upload Prescription",
+        type=["png", "jpg", "jpeg"]
+    )
 
     extracted_text = ""
     auto_age, auto_diag, auto_proc = None, None, None
@@ -128,83 +127,84 @@ elif page == "📊 Prediction":
         image = Image.open(uploaded_file)
         st.image(image, use_container_width=True)
 
-        try:
-            if IS_CLOUD:
-                extracted_text = "⚠ OCR not supported in cloud deployment"
-            else:
-                extracted_text = pytesseract.image_to_string(image)
-        except:
-            extracted_text = "⚠ OCR Error"
+        extracted_text = pytesseract.image_to_string(image)
 
-        st.subheader("📜 Extracted Text")
+        st.subheader("📜 Patient Details")
         st.text(extracted_text)
 
         auto_age, auto_diag, auto_proc = extract_details(extracted_text)
 
-    # -------- INPUT -------- #
-    age = st.number_input("Age", 1, 120, value=auto_age if auto_age else 25)
+    age = st.number_input(
+        "Age (1–120)",
+        min_value=1,
+        max_value=120,
+        value=auto_age if auto_age else 25
+    )
 
     network = st.selectbox("In Network?", ["Yes", "No"])
     prior_auth = st.selectbox("Prior Authorization", ["Yes", "No"])
-
     billing = st.number_input("Billing Amount ₹", min_value=0.0)
-    delay = st.number_input("Submission Delay", min_value=0)
+    delay = st.number_input("Submission Delay [Days]", min_value=0)
 
-    plan = st.selectbox("Insurance Type", list(plan_map.keys()))
-    st.info(plan_description[plan])
+    plan = st.selectbox(
+        "Insurance Type",
+        list(plan_map.keys())
+    )
 
-    procedure = st.selectbox("Procedure", list(procedure_map.keys()))
-    diagnosis = st.selectbox("Diagnosis", list(diagnosis_map.keys()))
+    st.info(f"ℹ️ {plan}: {plan_description[plan]}")
+
+    procedure = st.selectbox(
+        "Procedure Code",
+        list(procedure_map.keys()),
+        index=list(procedure_map.keys()).index(auto_proc)
+        if auto_proc in procedure_map else 0
+    )
+
+    diagnosis = st.selectbox(
+        "Diagnosis Code",
+        list(diagnosis_map.keys()),
+        index=list(diagnosis_map.keys()).index(auto_diag)
+        if auto_diag in diagnosis_map else 0
+    )
 
     if st.button("Predict"):
-
-        # -------- DATA PREP -------- #
-        user_data = pd.DataFrame(0, index=[0], columns=columns)
-
-        user_data.loc[0, 'patient_age_years'] = age
-        user_data.loc[0, 'is_in_network'] = 1 if network == "Yes" else 0
-        user_data.loc[0, 'prior_auth_required'] = 1 if prior_auth == "Yes" else 0
-        user_data.loc[0, 'billed_amount_usd'] = billing
-        user_data.loc[0, 'days_between_service_and_submission'] = delay
-
-        user_data.loc[0, f"insurance_plan_type_{plan}"] = 1
-        user_data.loc[0, f"procedure_code_cpt_{procedure}"] = 1
-        user_data.loc[0, f"primary_diagnosis_code_icd10_{diagnosis}"] = 1
-
-        # -------- FIX COLUMN ORDER -------- #
-        model_columns = list(columns)
-
-        for col in model_columns:
-            if col not in user_data.columns:
-                user_data[col] = 0
-
-        user_data = user_data[model_columns]
-
-        # -------- SCALING -------- #
-        user_scaled = scaler.transform(user_data.values)
-
-        # -------- PREDICTION -------- #
-        prob = model.predict_proba(user_scaled)[0][1] * 100
-
-        # -------- RULES -------- #
-        reasons = []
 
         network_val = 1 if network == "Yes" else 0
         prior_auth_val = 1 if prior_auth == "Yes" else 0
 
+        user_data = pd.DataFrame(0, index=[0], columns=columns)
+
+        user_data.loc[0, 'patient_age_years'] = age
+        user_data.loc[0, 'is_in_network'] = network_val
+        user_data.loc[0, 'prior_auth_required'] = prior_auth_val
+        user_data.loc[0, 'billed_amount_usd'] = billing
+        user_data.loc[0, 'days_between_service_and_submission'] = delay
+
+        plan_col = f"insurance_plan_type_{plan}"
+        proc_col = f"procedure_code_cpt_{procedure}"
+        diag_col = f"primary_diagnosis_code_icd10_{diagnosis}"
+
+        if plan_col in user_data.columns:
+            user_data.loc[0, plan_col] = 1
+        if proc_col in user_data.columns:
+            user_data.loc[0, proc_col] = 1
+        if diag_col in user_data.columns:
+            user_data.loc[0, diag_col] = 1
+
+        user_scaled = scaler.transform(user_data)
+        prob = model.predict_proba(user_scaled)[0][1] * 100
+
+        reasons = []
+
         if network_val == 0:
             reasons.append("Out-of-network provider")
-
         if prior_auth_val == 0:
             reasons.append("Missing prior authorization")
-
         if billing > 100000:
             reasons.append("High billing amount")
-
         if delay > 30:
             reasons.append("Late claim submission")
 
-        # -------- DECISION -------- #
         if len(reasons) >= 3:
             status = "DENIED"
         elif len(reasons) == 2:
@@ -212,46 +212,21 @@ elif page == "📊 Prediction":
         else:
             status = "APPROVED"
 
-        # -------- OUTPUT -------- #
         st.subheader("📊 Result")
         st.write("Claim Status:", status)
         st.write("Denial Probability:", round(prob, 2), "%")
 
-        # -------- WHY -------- #
         st.subheader("📌 Why this prediction?")
-
         if reasons:
-            st.write(f"The claim has **{round(prob, 2)}% denial probability** because:")
             for reason in reasons:
                 st.write(f"🔹 {reason}")
         else:
-            approval_reasons = []
+            st.write("✅ Low risk based on entered details")
 
-            if network_val == 1:
-                approval_reasons.append("Provider is in-network")
-
-            if prior_auth_val == 1:
-                approval_reasons.append("Prior authorization available")
-
-            if billing <= 100000:
-                approval_reasons.append("Normal billing amount")
-
-            if delay <= 30:
-                approval_reasons.append("Submitted on time")
-
-            if age <= 75:
-                approval_reasons.append("Normal patient profile")
-
-            st.write(f"The claim has **low denial probability ({round(prob, 2)}%)** because:")
-            for reason in approval_reasons:
-                st.write(f"✅ {reason}")
-
-        # -------- MEDICAL INFO -------- #
         st.subheader("🩺 Medical Info")
         st.write(f"{procedure} → {procedure_map[procedure]}")
         st.write(f"{diagnosis} → {diagnosis_map[diagnosis]}")
 
-        # -------- SAVE HISTORY -------- #
         history_row = {
             "Age": age,
             "Plan": plan,
@@ -263,7 +238,6 @@ elif page == "📊 Prediction":
 
         st.session_state.prediction_history.append(history_row)
 
-    # -------- HISTORY -------- #
     st.markdown("---")
     st.subheader("📁 Prediction History Report")
 
@@ -276,14 +250,15 @@ elif page == "📊 Prediction":
         csv = history_df.to_csv(index=False).encode("utf-8")
 
         st.download_button(
-            "⬇ Download Report",
-            csv,
-            "prediction_history.csv",
-            "text/csv"
+            label="⬇ Download Prediction Report (CSV)",
+            data=csv,
+            file_name="claim_prediction_history_report.csv",
+            mime="text/csv"
         )
 
         if st.button("🗑 Clear History"):
             st.session_state.prediction_history = []
             st.rerun()
+
     else:
         st.info("No predictions made yet.")
