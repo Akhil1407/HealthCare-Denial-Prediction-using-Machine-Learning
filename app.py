@@ -7,6 +7,7 @@ import pytesseract
 import re
 import os
 import platform
+import zipfile
 
 # -------- TESSERACT PATH -------- #
 if platform.system() == "Windows":
@@ -22,6 +23,12 @@ if "prediction_history" not in st.session_state:
     st.session_state.prediction_history = []
 
 # -------- LOAD FILES -------- #
+# 👇 ADD HERE
+zip_path = "model.zip"
+
+if not os.path.exists("model.pkl"):
+    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+        zip_ref.extractall()
 model = pickle.load(open("model.pkl", "rb"))
 scaler = pickle.load(open("scaler.pkl", "rb"))
 columns = pickle.load(open("columns.pkl", "rb"))
